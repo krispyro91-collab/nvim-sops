@@ -14,6 +14,7 @@ return function()
 	vim.cmd("silent write")
 
 	h.assert_eq(messages[1].message, "encrypt failed\n")
+	h.assert_eq(vim.bo.modified, true)
 	restore_notify()
 	fake.cleanup()
 end

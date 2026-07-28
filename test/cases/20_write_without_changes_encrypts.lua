@@ -14,7 +14,7 @@ return function()
 
 	h.assert_eq(h.read_calls(fake), {
 		"filestatus " .. encrypted,
-		"-d --output " .. vim.fs.dirname(encrypted) .. "/.decrypted~secret.yml " .. encrypted,
+		"-d " .. encrypted,
 		encrypted,
 	})
 	h.assert_eq(messages, {})

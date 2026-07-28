@@ -9,6 +9,10 @@ return function()
 	vim.cmd.edit(vim.fn.fnameescape(path))
 
 	h.assert_eq(sops.is_encrypted(), true)
-	h.assert_eq(vim.b.sops, "encrypted")
+	h.assert_eq(vim.b.sops, "e")
+
+	vim.api.nvim_buf_set_lines(0, 0, -1, false, { "plain" })
+	h.assert_eq(sops.is_encrypted(), false)
+	h.assert_eq(vim.b.sops, nil)
 	fake.cleanup()
 end

@@ -2,18 +2,16 @@ local h = require("test.helper")
 
 return function()
 	local fake = h.fake_sops()
-	local sops = h.setup()
+	vim.env.NVIM_FAKE_DECRYPT_TEXT = "first"
+	h.setup()
 
-	sops.disable()
 	local encrypted = h.temp_file("secret.yml", h.marker_lines())
 	vim.cmd.edit(vim.fn.fnameescape(encrypted))
-	sops.edit()
-	h.assert_eq(vim.b.sops, "d")
-
-	vim.cmd("SopsDisable!")
+	vim.env.NVIM_FAKE_DECRYPT_TEXT = "second"
+	vim.cmd.edit()
 
 	h.assert_eq(vim.api.nvim_buf_get_name(0), encrypted)
-	h.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), h.marker_lines())
-	h.assert_eq(vim.bo.buftype, "")
+	h.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "second" })
+	h.assert_eq(vim.b.sops, "d")
 	fake.cleanup()
 end

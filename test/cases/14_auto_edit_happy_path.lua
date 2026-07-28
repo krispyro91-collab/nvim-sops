@@ -5,10 +5,9 @@ return function()
 	h.setup()
 
 	local encrypted, tmpdir = h.copy_fixture("secret.txt")
-	local decrypted = vim.fs.joinpath(tmpdir, ".decrypted~secret.txt")
 	vim.cmd.edit(vim.fn.fnameescape(encrypted))
 
-	h.assert_eq(vim.api.nvim_buf_get_name(0), decrypted)
+	h.assert_eq(vim.api.nvim_buf_get_name(0), encrypted)
 	h.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { "secret text" })
 
 	vim.api.nvim_buf_set_lines(0, 0, -1, false, { "SECRET TEXT" })
@@ -19,6 +18,5 @@ return function()
 	h.assert_eq(decrypt.stdout, "SECRET TEXT\n")
 
 	vim.api.nvim_buf_delete(0, { force = true })
-	h.assert_eq(vim.fn.filereadable(decrypted), 0)
 	vim.fs.rm(tmpdir, { force = true, recursive = true })
 end

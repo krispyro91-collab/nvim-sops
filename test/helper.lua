@@ -3,6 +3,22 @@ local M = {}
 M.root = vim.fn.getcwd()
 M.fixtures = vim.fs.joinpath(M.root, "test", "fixtures")
 
+local env_names = {
+	"PATH",
+	"NVIM_FAKE_FILESTATUS_FAIL",
+	"NVIM_FAKE_DECRYPT_FAIL",
+	"NVIM_FAKE_DECRYPT_TEXT",
+	"NVIM_FAKE_DECRYPT_NO_EOL",
+	"NVIM_FAKE_ENCRYPT_FAIL",
+	"NVIM_FAKE_ENCRYPT_NO_CHANGES",
+	"SOPS_AGE_KEY_FILE",
+}
+local original_env = {}
+for _, name in ipairs(env_names) do
+	original_env[name] = { vim.env[name] }
+end
+local original_notify = vim.notify
+
 function M.assert_eq(actual, expected, message)
 	if not vim.deep_equal(actual, expected) then
 		error((message or "assertion failed") .. ": " .. vim.inspect(actual) .. " ~= " .. vim.inspect(expected), 2)
@@ -19,6 +35,11 @@ function M.setup()
 end
 
 function M.reset()
+	vim.notify = original_notify
+	for _, name in ipairs(env_names) do
+		vim.env[name] = original_env[name][1]
+	end
+
 	for _, command in ipairs({ "SopsEdit", "SopsEnable", "SopsDisable" }) do
 		pcall(vim.api.nvim_del_user_command, command)
 	end
@@ -81,12 +102,13 @@ function M.fake_sops()
 		"fi",
 		'if [ "$1" = -d ]; then',
 		'  [ "$NVIM_FAKE_DECRYPT_FAIL" = 1 ] && echo decrypt failed >&2 && exit 2',
-		'  printf \'%s\\n\' "${NVIM_FAKE_DECRYPT_TEXT:-decrypted}" > "$3"',
+		'  [ "$NVIM_FAKE_DECRYPT_NO_EOL" = 1 ] && printf %s "${NVIM_FAKE_DECRYPT_TEXT:-decrypted}" && exit 0',
+		"  printf '%s\\n' \"${NVIM_FAKE_DECRYPT_TEXT:-decrypted}\"",
 		"  exit 0",
 		"fi",
 		'[ "$NVIM_FAKE_ENCRYPT_FAIL" = 1 ] && echo encrypt failed >&2 && exit 3',
 		'[ "$NVIM_FAKE_ENCRYPT_NO_CHANGES" = 1 ] && exit 200',
-		'cat "$NVIM_SOPS_DECRYPTED_FILE_PATH" > "$1"',
+		'cat > "$1"',
 	}, exe)
 	vim.fn.setfperm(exe, "rwxr-xr-x")
 
@@ -99,6 +121,7 @@ function M.fake_sops()
 			vim.env.PATH = old_path
 			vim.env.NVIM_FAKE_FILESTATUS_FAIL = nil
 			vim.env.NVIM_FAKE_DECRYPT_FAIL = nil
+			vim.env.NVIM_FAKE_DECRYPT_NO_EOL = nil
 			vim.env.NVIM_FAKE_ENCRYPT_FAIL = nil
 			vim.env.NVIM_FAKE_ENCRYPT_NO_CHANGES = nil
 			vim.env.NVIM_FAKE_DECRYPT_TEXT = nil

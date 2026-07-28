@@ -3,18 +3,12 @@ local M = {
 	auto_edit = true,
 }
 
-local decrypted_prefix = ".decrypted~"
 local sops_markers = { "ENC[AES256_GCM", "lastmodified", "mac", "version" }
 
 ---@return boolean
 function M.is_decrypted()
 	local bufnr = vim.api.nvim_get_current_buf()
-	local path = vim.api.nvim_buf_get_name(bufnr)
-	if vim.startswith(vim.fs.basename(path), decrypted_prefix) then
-		vim.b[bufnr].sops = "decrypted"
-		return true
-	end
-	return false
+	return vim.b[bufnr].sops == "d"
 end
 
 ---@return boolean
@@ -22,6 +16,10 @@ function M.is_encrypted()
 	local bufnr = vim.api.nvim_get_current_buf()
 	local path = vim.api.nvim_buf_get_name(bufnr)
 	local seen = {}
+
+	if vim.b[bufnr].sops == "e" then
+		vim.b[bufnr].sops = nil
+	end
 
 	if path == "" then
 		return false
@@ -31,7 +29,7 @@ function M.is_encrypted()
 		return false
 	end
 
-	for _, line in ipairs(vim.api.nvim_buf_get_lines(bufnr, -50, -1, false)) do
+	for _, line in ipairs(vim.api.nvim_buf_get_lines(bufnr, -51, -1, false)) do
 		for _, marker in ipairs(sops_markers) do
 			if not seen[marker] and line:find(marker, 1, true) then
 				seen[marker] = true
@@ -40,7 +38,7 @@ function M.is_encrypted()
 					local file_status = vim.system({ "sops", "filestatus", path }, { stdout = false, stderr = false })
 						:wait()
 					if file_status.code == 0 then
-						vim.b[bufnr].sops = "encrypted"
+						vim.b[bufnr].sops = "e"
 						return true
 					end
 					return false
@@ -53,68 +51,70 @@ function M.is_encrypted()
 end
 
 function M.edit()
-	local bufnr_encrypted = vim.api.nvim_get_current_buf()
-	local path_encrypted = vim.api.nvim_buf_get_name(bufnr_encrypted)
+	if M.is_decrypted() then
+		return
+	end
 
-	local path_decrypted = vim.fs.joinpath(
-		vim.fs.dirname(path_encrypted),
-		("%s%s"):format(decrypted_prefix, vim.fs.basename(path_encrypted))
-	)
-	local decrypt_result = vim.system({ "sops", "-d", "--output", path_decrypted, path_encrypted }, { text = true })
-		:wait()
+	local bufnr = vim.api.nvim_get_current_buf()
+	local path = vim.api.nvim_buf_get_name(bufnr)
+	local decrypt_result = vim.system({ "sops", "-d", path }, { text = true }):wait()
 	if decrypt_result.code ~= 0 then
 		vim.notify(decrypt_result.stderr, vim.log.levels.ERROR)
 		return
 	end
 
-	vim.cmd.edit(vim.fn.fnameescape(path_decrypted))
+	local endofline = vim.endswith(decrypt_result.stdout, "\n")
+	local lines = vim.split(decrypt_result.stdout:gsub("\n$", ""), "\n", { plain = true })
+	if #lines == 0 then
+		lines = { "" }
+	end
 
-	local bufnr_decrypted = vim.api.nvim_get_current_buf()
-	local group = vim.api.nvim_create_augroup("SopsDecryptedBuffer" .. bufnr_decrypted, { clear = true })
+	local swapfile = vim.bo[bufnr].swapfile
+	local undofile = vim.bo[bufnr].undofile
 
-	vim.b[bufnr_decrypted].sops_encrypted_path = path_encrypted
-	vim.b[bufnr_decrypted].sops_decrypted_path = path_decrypted
+	local group = vim.api.nvim_create_augroup("SopsDecryptedBuffer" .. bufnr, { clear = true })
 
-	vim.api.nvim_buf_delete(bufnr_encrypted, {})
+	vim.b[bufnr].sops = "d"
 
-	vim.api.nvim_create_autocmd("BufWritePost", {
+	vim.bo[bufnr].endofline = endofline
+	vim.bo[bufnr].swapfile = false
+	vim.bo[bufnr].undofile = false
+	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+	vim.bo[bufnr].modified = false
+
+	vim.api.nvim_create_autocmd("BufWriteCmd", {
 		group = group,
-		buffer = bufnr_decrypted,
+		buffer = bufnr,
 		callback = function()
-			local encrypt_result = vim.system({ "sops", path_encrypted }, {
+			local plaintext = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+				.. (vim.bo[bufnr].endofline and "\n" or "")
+
+			local encrypt_result = vim.system({ "sops", path }, {
 				text = true,
+				stdin = plaintext,
 				env = {
-					SOPS_EDITOR = 'sh -c \'cat "$NVIM_SOPS_DECRYPTED_FILE_PATH" > "$1"\' sh',
-					NVIM_SOPS_DECRYPTED_FILE_PATH = path_decrypted,
+					SOPS_EDITOR = "sh -c 'cat > \"$1\"' sh",
 				},
 			}):wait()
 
 			if encrypt_result.code ~= 0 and encrypt_result.code ~= 200 then
+				vim.bo[bufnr].modified = true
 				vim.notify(encrypt_result.stderr, vim.log.levels.ERROR)
 				return
 			end
+
+			vim.bo[bufnr].modified = false
 		end,
 	})
 
-	vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
+	vim.api.nvim_create_autocmd("BufUnload", {
 		group = group,
-		buffer = bufnr_decrypted,
+		buffer = bufnr,
 		callback = function()
-			vim.fs.rm(path_decrypted, { force = true })
+			vim.b[bufnr].sops = nil
+			vim.bo[bufnr].swapfile = swapfile
+			vim.bo[bufnr].undofile = undofile
 			pcall(vim.api.nvim_del_augroup_by_id, group)
-		end,
-	})
-
-	vim.api.nvim_create_autocmd("QuitPre", {
-		group = group,
-		callback = function()
-			if vim.bo[bufnr_decrypted].modified and vim.v.cmdbang ~= 1 then
-				return
-			end
-
-			vim.fs.rm(path_decrypted, { force = true })
-			pcall(vim.api.nvim_del_augroup_by_id, group)
-			pcall(vim.api.nvim_buf_delete, bufnr_decrypted, { force = vim.v.cmdbang == 1 })
 		end,
 	})
 end
@@ -123,7 +123,7 @@ end
 function M.enable(opts)
 	M.auto_edit = true
 
-	if opts and opts.bang then
+	if opts and opts.bang and M.is_encrypted() then
 		M.edit()
 	end
 end
@@ -132,17 +132,17 @@ end
 function M.disable(opts)
 	M.auto_edit = false
 
-	if opts and opts.bang then
+	if opts and opts.bang and M.is_decrypted() then
 		local bufnr = vim.api.nvim_get_current_buf()
-		local path_encrypted = vim.b[bufnr].sops_encrypted_path
+		local path = vim.api.nvim_buf_get_name(bufnr)
 		vim.api.nvim_buf_delete(bufnr, { force = true })
-		vim.cmd.edit(vim.fn.fnameescape(path_encrypted))
+		vim.cmd.edit(vim.fn.fnameescape(path))
 	end
 end
 
 function M.setup()
 	vim.api.nvim_create_user_command("SopsEdit", M.edit, {
-		desc = "Edit current sops file via temporary decrypted file",
+		desc = "Edit current sops file in a decrypted buffer",
 	})
 
 	vim.api.nvim_create_user_command("SopsEnable", M.enable, {

@@ -6,14 +6,16 @@ return function()
 
 	sops.disable()
 	local encrypted = h.temp_file("secret.yml", h.marker_lines())
-	local decrypted = vim.fs.joinpath(vim.fs.dirname(encrypted), ".decrypted~secret.yml")
 	vim.cmd.edit(vim.fn.fnameescape(encrypted))
 	sops.edit()
+	local bufnr = vim.api.nvim_get_current_buf()
 	vim.api.nvim_buf_set_lines(0, 0, -1, false, { "changed" })
 
-	vim.api.nvim_exec_autocmds("QuitPre", {})
+	vim.cmd.enew()
+	local unloaded = pcall(vim.cmd.bunload, bufnr)
 
-	h.assert_eq(vim.api.nvim_buf_get_name(0), decrypted)
-	h.assert_eq(vim.fn.filereadable(decrypted), 1)
+	h.assert_eq(unloaded, false)
+	h.assert_eq(vim.api.nvim_buf_get_name(bufnr), encrypted)
+	h.assert_eq(vim.b[bufnr].sops, "d")
 	fake.cleanup()
 end

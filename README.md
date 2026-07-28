@@ -1,6 +1,6 @@
 # nvim-sops
 
-Edit [SOPS](https://github.com/getsops/sops) encrypted files in Neovim through a temporary decrypted buffer.
+Edit [SOPS](https://github.com/getsops/sops) encrypted files in an in-memory decrypted Neovim buffer.
 
 Inspired by [vscode-sops](https://github.com/signageos/vscode-sops).
 
@@ -25,23 +25,25 @@ require("sops").setup()
 
 ## Commands
 
-- `:SopsEdit` decrypts the current file into a temporary sibling file, opens it, and re-encrypts the original file after writes.
+- `:SopsEdit` decrypts the current file in memory and re-encrypts it after writes.
 - `:SopsEnable` enables automatic decrypt-on-open. `:SopsEnable!` also decrypts the current file, like `:SopsEdit`.
-- `:SopsDisable` disables automatic decrypt-on-open. `:SopsDisable!` also closes a decrypted buffer and opens the encrypted file.
+- `:SopsDisable` disables automatic decrypt-on-open. `:SopsDisable!` also discards any unwritten plaintext, closes the decrypted buffer, and opens the encrypted file.
 
 Automatic decrypt-on-open checks the last 50 lines for SOPS encryption markers, then confirms with `sops filestatus <file>`.
 
-Temporary decrypted files are named `.decrypted~<original-name>` and are removed when their buffer is deleted or Neovim exits.
+The buffer keeps the encrypted file's path, so `:edit`, buffer unloading, and sessions reopen the encrypted file normally. Swap and persistent undo files are disabled while plaintext is loaded.
 
 ## API
 
 - `require("sops").setup()` creates commands and automatic decrypt-on-open autocmds.
-- `require("sops").edit()` decrypts the current file into a temporary sibling file and wires writes back through SOPS.
+- `require("sops").edit()` decrypts the current file in memory and wires writes back through SOPS.
 - `require("sops").enable(opts)` enables automatic decrypt-on-open. With `{ bang = true }`, it also decrypts the current buffer.
 - `require("sops").disable(opts)` disables automatic decrypt-on-open. With `{ bang = true }`, it closes a decrypted buffer and opens the encrypted file.
-- `require("sops").is_decrypted()` checks whether the current buffer is a temporary decrypted file and sets `vim.b.sops = "decrypted"` when true.
-- `require("sops").is_encrypted()` checks the current buffer for SOPS encryption markers, then confirms with `sops filestatus` and sets `vim.b.sops = "encrypted"` when true.
+- `require("sops").is_decrypted()` checks whether the current buffer contains decrypted SOPS content.
+- `require("sops").is_encrypted()` checks the current buffer for SOPS encryption markers, then confirms with `sops filestatus` and sets `vim.b.sops = "e"` when true.
 - `require("sops").auto_edit` contains the active automatic decrypt-on-open state.
+
+`vim.b.sops` is `"d"` for decrypted buffers, `"e"` for encrypted buffers, and `nil` otherwise.
 
 Example lualine component:
 
@@ -53,7 +55,7 @@ sections = {
         return "󰿇 SOPS"
       end,
       cond = function()
-        return vim.b["sops"] == "decrypted"
+        return vim.b["sops"] == "d"
       end,
     },
     {
@@ -61,7 +63,7 @@ sections = {
         return "󰍁 SOPS"
       end,
       cond = function()
-        return vim.b["sops"] == "encrypted"
+        return vim.b["sops"] == "e"
       end,
     },
   },
