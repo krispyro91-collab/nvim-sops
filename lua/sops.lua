@@ -35,8 +35,21 @@ function M.is_encrypted()
 				seen[marker] = true
 
 				if vim.tbl_count(seen) == #sops_markers then
-					local file_status = vim.system({ "sops", "filestatus", path }, { stdout = false, stderr = false })
-						:wait()
+					local file_status_args = { "sops", "filestatus" }
+					
+					if not path:match("%.[^/]+$") then
+					    vim.list_extend(file_status_args, {
+					        "--input-type", "json",
+					        "--output-type", "json",
+					    })
+					end
+					
+					table.insert(file_status_args, path)
+					
+					local file_status = vim.system(
+					    file_status_args,
+					    { stdout = false, stderr = false }
+					):wait()
 					if file_status.code == 0 then
 						vim.b[bufnr].sops = "e"
 						return true
