@@ -57,7 +57,18 @@ function M.edit()
 
 	local bufnr = vim.api.nvim_get_current_buf()
 	local path = vim.api.nvim_buf_get_name(bufnr)
-	local decrypt_result = vim.system({ "sops", "-d", path }, { text = true }):wait()
+	local decrypt_args = { "sops", "-d" }
+
+	if not path:match("%.[^/]+$") then
+	    vim.list_extend(decrypt_args, {
+	        "--input-type", "json",
+	        "--output-type", "json",
+	    })
+	end
+	
+	table.insert(decrypt_args, path)
+	
+	local decrypt_result = vim.system(decrypt_args, { text = true }):wait()
 	if decrypt_result.code ~= 0 then
 		vim.notify(decrypt_result.stderr, vim.log.levels.ERROR)
 		return
@@ -89,12 +100,23 @@ function M.edit()
 			local plaintext = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
 				.. (vim.bo[bufnr].endofline and "\n" or "")
 
-			local encrypt_result = vim.system({ "sops", path }, {
-				text = true,
-				stdin = plaintext,
-				env = {
-					SOPS_EDITOR = "sh -c 'cat > \"$1\"' sh",
-				},
+			local encrypt_args = { "sops" }
+			
+			if not path:match("%.[^/]+$") then
+			    vim.list_extend(encrypt_args, {
+			        "--input-type", "json",
+			        "--output-type", "json",
+			    })
+			end
+			
+			table.insert(encrypt_args, path)
+			
+			local encrypt_result = vim.system(encrypt_args, {
+			    text = true,
+			    stdin = plaintext,
+			    env = {
+			        SOPS_EDITOR = "sh -c 'cat > \"$1\"' sh",
+			    },
 			}):wait()
 
 			if encrypt_result.code ~= 0 and encrypt_result.code ~= 200 then
